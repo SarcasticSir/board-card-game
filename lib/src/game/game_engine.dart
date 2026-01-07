@@ -1,10 +1,9 @@
 import 'dart:ui';
-import '../ui/ui_mode.dart';
-
 
 import 'package:flame/game.dart';
 import 'package:flutter/widgets.dart';
 
+import '../ui/ui_mode.dart';
 import 'game_mode.dart';
 import 'game_snapshot.dart';
 
@@ -22,11 +21,13 @@ class BoardGame extends FlameGame {
   final VoidCallback onHudChanged;
   final void Function(String msg) onToast;
   final GameMode mode;
+  final UiMode uiMode;
 
   BoardGame({
     required this.onHudChanged,
     required this.onToast,
     required this.mode,
+    required this.uiMode,
   });
 
   bool get isHost => mode == GameMode.host;
@@ -47,7 +48,7 @@ class BoardGame extends FlameGame {
   final RoundManager roundManager = RoundManager();
   final TurnManager turnManager = TurnManager(totalPlayers: 4);
 
-  // Avoid late-init issues by constructing immediately.
+  // Avoid late-init issues on resize.
   final SwapManager swapManager = SwapManager(totalPlayers: 4);
 
   late RulesEngine rules;
@@ -63,15 +64,15 @@ class BoardGame extends FlameGame {
   bool get inSwapPhaseActive => inSwapPhase;
 
   // ======================
-  // Seven mode (mobile-first)
+  // Seven mode (tap-to-move)
   // ======================
   bool _inSevenMode = false;
   int _sevenRemaining = 0;
 
-  // Snapshots allow perfect undo/abort.
+  // Snapshot history for perfect undo/abort
   final List<GameSnapshot> _sevenHistory = [];
 
-  // HUD expects these names:
+  // These are the names your current HUD expects:
   bool get inSevenMode => _inSevenMode;
   int get sevenRemainingSteps => _sevenRemaining;
   bool get canUndoSeven => _inSevenMode && _sevenHistory.length > 1;
@@ -92,7 +93,7 @@ class BoardGame extends FlameGame {
   // ======================
   @override
   Future<void> onLoad() async {
-    // Prepare basic objects; geometry & pieces will be created in onGameResize.
+    // Initialize logic-only objects; geometry depends on size (set on resize).
     rules = RulesEngine(const []);
     playableMoves = PlayableMoves(rules);
 
@@ -104,16 +105,17 @@ class BoardGame extends FlameGame {
   void onGameResize(Vector2 canvasSize) {
     super.onGameResize(canvasSize);
 
-    // Geometry depends on `size` being set.
     _layoutBoard();
 
     if (!_piecesReady) {
       _initPieces();
       _piecesReady = true;
 
+      // Bind rules to live piece states
       rules = RulesEngine(pieces.map((p) => p.state).toList());
       playableMoves = PlayableMoves(rules);
     } else {
+      // Re-sync visuals after geometry changed
       for (final p in pieces) {
         p.syncVisual();
       }
@@ -174,6 +176,8 @@ class BoardGame extends FlameGame {
 
     _notifyHud();
   }
+
+  void applySnapshot(GameSnapshot snap) => importState(snap);
 
   // ======================
   // SAFE UI notifications
@@ -305,7 +309,7 @@ class BoardGame extends FlameGame {
   }
 
   // ======================
-  // Seven mode (mobile-first)
+  // Seven mode
   // ======================
   void _enterSevenMode() {
     _inSevenMode = true;
@@ -322,7 +326,6 @@ class BoardGame extends FlameGame {
     if (!_inSevenMode) return;
     if (_sevenRemaining <= 0) return;
 
-    // Must be your piece, and must be on track.
     if (piece.state.owner != turnManager.currentPlayer) {
       _notifyToast('Not your piece.');
       return;
@@ -332,8 +335,6 @@ class BoardGame extends FlameGame {
       return;
     }
 
-    // 7 captures bypassed pieces: we implement it as 1 step at a time,
-    // so bypass-capture behavior is effectively "capture on the step".
     final res = rules.moveOnTrack(
       piece.state,
       steps: 1,
@@ -346,7 +347,6 @@ class BoardGame extends FlameGame {
       return;
     }
 
-    // Sync moved + any captured.
     piece.syncVisual();
     for (final cap in res.captured) {
       final capturedPc = pieces.firstWhere(
@@ -367,7 +367,6 @@ class BoardGame extends FlameGame {
   void _sevenUndo() {
     if (!canUndoSeven) return;
 
-    // Remove current snapshot, revert to previous.
     _sevenHistory.removeLast();
     importState(_sevenHistory.last);
 
@@ -379,7 +378,7 @@ class BoardGame extends FlameGame {
     if (!_inSevenMode) return;
     if (_sevenHistory.isEmpty) return;
 
-    // Revert to baseline snapshot. Keep the 7 card in hand (not discarded).
+    // revert to baseline snapshot; keep 7 card in hand
     importState(_sevenHistory.first);
 
     _inSevenMode = false;
@@ -391,7 +390,6 @@ class BoardGame extends FlameGame {
   }
 
   void _commitSevenAuto() {
-    // Discard the selected 7 now.
     final card = selectedCard;
     final p = turnManager.currentPlayer;
 
@@ -439,7 +437,6 @@ class BoardGame extends FlameGame {
 
     final card = selectedCard!;
 
-    // Selecting 7 enters mode; the actual moves happen by tapping pieces.
     if (card.type == CardType.seven) {
       _enterSevenMode();
       return;
@@ -512,7 +509,6 @@ class BoardGame extends FlameGame {
       _notifyToast('Finish 7 (undo/abort) first.');
       return;
     }
-
     selectedCard = card;
     _notifyHud();
   }
@@ -556,7 +552,7 @@ class BoardGame extends FlameGame {
       canvas.drawCircle(Offset(pos.x, pos.y), 6, dotPaint);
     }
 
-    // Immune markers (bigger colored dots on immune indices)
+    // Immune markers
     const immuneColors = [
       Color(0xFF42A5F5),
       Color(0xFFEF5350),

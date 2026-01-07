@@ -1,67 +1,58 @@
+import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
-import 'src/ui/game_screen.dart';
-import 'src/ui/ui_mode.dart';
 
-void main() {
-  runApp(const MyApp());
-}
+import '../game/game_engine.dart';
+import '../game/game_mode.dart';
+import 'hud_overlay.dart';
+import 'ui_mode.dart';
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class GameScreen extends StatefulWidget {
+  final UiMode uiMode;
+
+  const GameScreen({
+    super.key,
+    required this.uiMode,
+  });
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Board Card Game',
-      theme: ThemeData.dark(useMaterial3: true),
-      home: const ModeSelectScreen(),
-    );
-  }
+  State<GameScreen> createState() => _GameScreenState();
 }
 
-class ModeSelectScreen extends StatelessWidget {
-  const ModeSelectScreen({super.key});
+class _GameScreenState extends State<GameScreen> {
+  late final BoardGame game;
+
+  @override
+  void initState() {
+    super.initState();
+
+    game = BoardGame(
+      mode: GameMode.host,
+      uiMode: widget.uiMode,
+      onHudChanged: () => setState(() {}),
+      onToast: (msg) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(msg),
+            duration: const Duration(milliseconds: 900),
+          ),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Select UI Mode',
-              style: TextStyle(fontSize: 22),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(
-                    builder: (_) => const GameScreen(
-                      uiMode: UiMode.desktop,
-                    ),
-                  ),
-                );
-              },
-              child: const Text('Desktop'),
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(
-                    builder: (_) => const GameScreen(
-                      uiMode: UiMode.mobile,
-                    ),
-                  ),
-                );
-              },
-              child: const Text('Mobile'),
-            ),
-          ],
-        ),
+      body: GameWidget(
+        game: game,
+        overlayBuilderMap: {
+          HudOverlay.overlayId: (_, g) =>
+              HudOverlay(game: g as BoardGame),
+        },
+        initialActiveOverlays: const [
+          HudOverlay.overlayId,
+        ],
       ),
     );
   }
