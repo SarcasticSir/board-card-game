@@ -1,0 +1,14 @@
+name: board_game
+description: Local test version of board card game
+publish_to: 'none'
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flame: ^1.15.0
+
+flutter:
+  uses-material-design: true
