@@ -17,6 +17,18 @@ import 'rules.dart';
 import 'playable_moves.dart';
 import 'swap_manager.dart';
 
+enum DebugHandPreset {
+  sevenTest,
+  jackTest,
+  jokerTest,
+  mixed,
+}
+
+enum FourDirection {
+  forward,
+  backward,
+}
+
 class BoardGame extends FlameGame {
   final VoidCallback onHudChanged;
   final void Function(String msg) onToast;
@@ -62,6 +74,21 @@ class BoardGame extends FlameGame {
 
   bool inSwapPhase = false;
   bool get inSwapPhaseActive => inSwapPhase;
+
+  // ======================
+  // Card 4 direction
+  // ======================
+  FourDirection fourDirection = FourDirection.forward;
+
+  void setFourDirection(FourDirection dir) {
+    if (!isHost) return;
+    if (inSwapPhase) return;
+    if (_inSevenMode) return;
+    if (selectedCard?.type != CardType.four) return;
+
+    fourDirection = dir;
+    _notifyHud();
+  }
 
   // ======================
   // Seven mode (tap-to-move)
@@ -137,6 +164,74 @@ class BoardGame extends FlameGame {
   }
 
   // ======================
+  // DEBUG: Preset hands
+  // ======================
+  void debugApplyPreset(DebugHandPreset preset) {
+    if (!isHost) return;
+    if (inSwapPhase) {
+      _notifyToast('DEBUG: Finish swap first (or disable swap for testing).');
+      return;
+    }
+    if (_inSevenMode) {
+      _notifyToast('DEBUG: Finish 7 (undo/abort) first.');
+      return;
+    }
+
+    final p = turnManager.currentPlayer;
+
+    // IMPORTANT: The outer list must be mutable (no `const [...]`), otherwise
+    // remove() will throw UnsupportedError.
+    switch (preset) {
+      case DebugHandPreset.sevenTest:
+        hands[p] = <GameCard>[
+          const GameCard(type: CardType.seven),
+          const GameCard(type: CardType.seven),
+          const GameCard(type: CardType.seven),
+          const GameCard(type: CardType.four),
+          const GameCard(type: CardType.ace),
+        ];
+        break;
+
+      case DebugHandPreset.jackTest:
+        hands[p] = <GameCard>[
+          const GameCard(type: CardType.jack),
+          const GameCard(type: CardType.jack),
+          const GameCard(type: CardType.king),
+          const GameCard(type: CardType.number, value: 10),
+        ];
+        break;
+
+      case DebugHandPreset.jokerTest:
+        hands[p] = <GameCard>[
+          const GameCard(type: CardType.joker),
+          const GameCard(type: CardType.joker),
+          const GameCard(type: CardType.four),
+          const GameCard(type: CardType.queen),
+        ];
+        break;
+
+      case DebugHandPreset.mixed:
+        hands[p] = <GameCard>[
+          const GameCard(type: CardType.ace),
+          const GameCard(type: CardType.four),
+          const GameCard(type: CardType.seven),
+          const GameCard(type: CardType.jack),
+          const GameCard(type: CardType.joker),
+          const GameCard(type: CardType.king),
+        ];
+        break;
+    }
+
+    selectedCard = null;
+    fourDirection = FourDirection.forward;
+    passedPlayers.remove(p);
+
+    _notifyToast('DEBUG: Set hand for Player ${p + 1}');
+    _notifyHud();
+    _checkForcedPass();
+  }
+
+  // ======================
   // Serialization
   // ======================
   GameSnapshot exportState() {
@@ -174,6 +269,10 @@ class BoardGame extends FlameGame {
       live.syncVisual();
     }
 
+    // avoid carrying transient UI state across snapshots
+    selectedCard = null;
+    fourDirection = FourDirection.forward;
+
     _notifyHud();
   }
 
@@ -209,8 +308,10 @@ class BoardGame extends FlameGame {
     );
 
     trackPositions = buildTrackPositions(boardTopLeft, boardSize);
-    nestPositions = List.generate(4, (p) => nestSlots(boardTopLeft, boardSize, p));
-    goalPositions = List.generate(4, (p) => goalSlots(boardTopLeft, boardSize, p));
+    nestPositions =
+        List.generate(4, (p) => nestSlots(boardTopLeft, boardSize, p));
+    goalPositions =
+        List.generate(4, (p) => goalSlots(boardTopLeft, boardSize, p));
   }
 
   void _initPieces() {
@@ -252,6 +353,7 @@ class BoardGame extends FlameGame {
     }
 
     selectedCard = null;
+    fourDirection = FourDirection.forward;
     inSwapPhase = true;
 
     _notifyHud();
@@ -385,6 +487,9 @@ class BoardGame extends FlameGame {
     _sevenRemaining = 0;
     _sevenHistory.clear();
 
+    selectedCard = null;
+    fourDirection = FourDirection.forward;
+
     _notifyHud();
     _notifyToast('7 aborted.');
   }
@@ -402,6 +507,7 @@ class BoardGame extends FlameGame {
     _sevenRemaining = 0;
     _sevenHistory.clear();
     selectedCard = null;
+    fourDirection = FourDirection.forward;
 
     turnManager.next();
     _checkForcedPass();
@@ -460,6 +566,7 @@ class BoardGame extends FlameGame {
     }
 
     selectedCard = null;
+    fourDirection = FourDirection.forward;
     turnManager.next();
     _checkForcedPass();
   }
@@ -485,8 +592,12 @@ class BoardGame extends FlameGame {
         return rules.moveOnTrack(piece.state, steps: 12, forward: true);
 
       case CardType.four:
-        // We'll add forward/back choice next.
-        return rules.moveOnTrack(piece.state, steps: 4, forward: true);
+        // Backward 4 never enters goal because goal entry requires forward==true in RulesEngine.
+        return rules.moveOnTrack(
+          piece.state,
+          steps: 4,
+          forward: fourDirection == FourDirection.forward,
+        );
 
       case CardType.seven:
         return const MoveResult.err('Seven handled via seven-mode');
@@ -510,6 +621,7 @@ class BoardGame extends FlameGame {
       return;
     }
     selectedCard = card;
+    fourDirection = FourDirection.forward;
     _notifyHud();
   }
 
@@ -520,6 +632,7 @@ class BoardGame extends FlameGame {
       return;
     }
     selectedCard = null;
+    fourDirection = FourDirection.forward;
     turnManager.next();
     _checkForcedPass();
   }
